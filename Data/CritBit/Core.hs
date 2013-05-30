@@ -26,11 +26,12 @@ module Data.CritBit.Core
     , calcDirection
     , direction
     , followPrefixes
+    , choose
     ) where
 
-import Data.Bits ((.|.), (.&.), complement, shiftR, xor)
+import Data.Bits ((.&.), shiftL, shiftR, xor)
 import Data.CritBit.Types.Internal
-import Data.Word (Word16)
+import Data.Word (Word16, Word32)
 
 -- | /O(log n)/. Insert with a function, combining key, new value and old value.
 -- @'insertWithKey' f key value cb@
@@ -47,27 +48,22 @@ insertWithKey :: CritBitKey k => (k -> v -> v -> v) -> k -> v -> CritBit k v
               -> CritBit k v
 insertWithKey f k v (CritBit root) = CritBit . go $ root
   where
-    go i@(Internal left right _ _)
-      | direction k i == 0 = go left
-      | otherwise          = go right
-    go (Leaf lk _)         = rewalk root
+    go i@(Internal left right _) = go (choose k i left right)
+    go (Leaf lk _)               = rewalk root
       where
-        rewalk i@(Internal left right byte otherBits)
-          | byte > n                     = finish i
-          | byte == n && otherBits > nob = finish i
-          | direction k i == 0           = i { ileft = rewalk left }
-          | otherwise                    = i { iright = rewalk right }
-        rewalk i                         = finish i
+        rewalk i@(Internal left right bit)
+          | bit > n  = finish i
+          | otherwise = choose k i (i { ileft  = rewalk left  })
+                                   (i { iright = rewalk right })
+        rewalk i = finish i
 
         finish (Leaf _ v') | k == lk = Leaf k (f k v v')
         finish node
-          | nd == 0   = Internal { ileft = node, iright = Leaf k v,
-                                   ibyte = n, iotherBits = nob }
-          | otherwise = Internal { ileft = Leaf k v, iright = node,
-                                   ibyte = n, iotherBits = nob }
+          | nd == 0   = Internal { ileft = node, iright = Leaf k v, ibit = n }
+          | otherwise = Internal { ileft = Leaf k v, iright = node, ibit = n }
 
-        (n, nob, c) = followPrefixes k lk
-        nd          = calcDirection nob c
+        (n, c) = followPrefixes k lk
+        nd     = calcDirection n c
     go Empty = Leaf k v
 {-# INLINABLE insertWithKey #-}
 
@@ -80,9 +76,7 @@ lookupWith :: (CritBitKey k) =>
 -- algorithm with trivial variations.
 lookupWith notFound found k (CritBit root) = go root
   where
-    go i@(Internal left right _ _)
-       | direction k i == 0  = go left
-       | otherwise           = go right
+    go i@(Internal left right _) = go (choose k i left right)
     go (Leaf lk v) | k == lk = found v
     go _                     = notFound
 {-# INLINE lookupWith #-}
@@ -105,7 +99,7 @@ updateLookupWithKey :: (CritBitKey k) => (k -> v -> Maybe v) -> k
 -- using continuations, and benchmark the two versions.)
 updateLookupWithKey f k t@(CritBit root) = go root CritBit
   where
-    go i@(Internal left right _ _) cont
+    go i@(Internal left right _) cont
       | direction k i == 0 = go left $ \new ->
                              case new of
                                Empty -> cont right
@@ -124,16 +118,22 @@ updateLookupWithKey f k t@(CritBit root) = go root CritBit
 -- | Determine which direction we should move down the tree based on
 -- the critical bitmask at the current node and the corresponding byte
 -- in the key. Left is 0, right is 1.
-direction :: (CritBitKey k) => k -> Node k v -> Int
-direction k (Internal _ _ byte otherBits) =
-    calcDirection otherBits (getByte k byte)
+direction :: (CritBitKey k) => k -> Node k v -> Word16
+direction k (Internal _ _ bit) = 
+    calcDirection bit (getByte k (fromIntegral bit `div` 9))
 direction _ _ = error "Data.CritBit.Core.direction: unpossible!"
 {-# INLINE direction #-}
 
+choose :: (CritBitKey k) => k -> Node k v -> a -> a -> a
+choose k node a b
+  | direction k node == 0 = a
+  | otherwise             = b
+{-# INLINE choose #-}
+
 -- Given a critical bitmask and a byte, return 0 to move left, 1 to
 -- move right.
-calcDirection :: BitMask -> Word16 -> Int
-calcDirection otherBits c = (1 + fromIntegral (otherBits .|. c)) `shiftR` 9
+calcDirection :: Word32 -> Word16 -> Word16
+calcDirection bit c = ((c `shiftR` fromIntegral (8 - (bit `mod` 9))) .&. 1)
 {-# INLINE calcDirection #-}
 
 -- | Figure out the byte offset at which the key we are interested in
@@ -144,24 +144,48 @@ calcDirection otherBits c = (1 + fromIntegral (otherBits .|. c)) `shiftR` 9
 followPrefixes :: (CritBitKey k) =>
                   k             -- ^ The key from "outside" the tree.
                -> k             -- ^ Key from the leaf we reached.
-               -> (Int, BitMask, Word16)
-{-# INLINE followPrefixes #-}
+               -> (Word32, Word16)
 followPrefixes k l = go 0
   where
-    go n | n == byteCount k = (n, maskLowerBits c, c)
-         | n == byteCount l = (n, maskLowerBits b, 0)
-         | b /= c           = (n, maskLowerBits (b `xor` c), c)
+    go :: Int -> (Word32, Word16)
+    go n | n == byteCount k = (fromIntegral (n * 9), 0x100)
+         | n == byteCount l = (fromIntegral (n * 9), 0)
+         | b /= c           = (bit (b `xor` c), c)
          | otherwise        = go (n+1)
-      where b = getByte k n
-            c = getByte l n
+      where 
+        b = getByte k n
+        c = getByte l n
+        bit :: Word16 -> Word32
+        bit v = fromIntegral (9 * n + 8 - msb8 v)
+        {-# INLINE bit #-}
+        msb8 v = if (v .&. 0xf0) == 0 then msb4 (v `shiftL` 4) else 4 + msb4 v
+        {-# INLINE msb8 #-}
+        msb4 v = if (v .&. 0xc0) == 0 then msb2 (v `shiftL` 2) else 2 + msb2 v
+        {-# INLINE msb4 #-}
+        msb2 v = if (v .&. 0x80) == 0 then 0 else 1
+        {-# INLINE msb2 #-}
+{-# INLINE followPrefixes #-}
 
-    maskLowerBits :: Word16 -> Word16
-    maskLowerBits v = (n3 .&. (complement (n3 `shiftR` 1))) `xor` 0x1FF
-      where
-        n3 = n2 .|. (n2 `shiftR` 8)
-        n2 = n1 .|. (n1 `shiftR` 4)
-        n1 = n0 .|. (n0 `shiftR` 2)
-        n0 = v  .|. (v  `shiftR` 1)
+--followPrefixes' :: (CritBitKey k) =>
+--                   k             -- ^ The key from "outside" the tree.
+--                -> k             -- ^ Key from the leaf we reached.
+--                -> (Int, BitMask, Word16)
+--{-# INLINE followPrefixes' #-}
+--followPrefixes' k l = go 0
+--  where
+--    go n | n == byteCount k = (n, maskLowerBits c, c)
+--         | n == byteCount l = (n, maskLowerBits b, 0)
+--         | b /= c           = (n, maskLowerBits (b `xor` c), c)
+--      where b = getByte k n
+--            c = getByte l n
+--
+--    maskLowerBits :: Word16 -> Word16
+--    maskLowerBits v = (n3 .&. (complement (n3 `shiftR` 1))) `xor` 0x1FF
+--      where
+--        n3 = n2 .|. (n2 `shiftR` 8)
+--        n2 = n1 .|. (n1 `shiftR` 4)
+--        n1 = n0 .|. (n0 `shiftR` 2)
+--        n0 = v  .|. (v  `shiftR` 1)
 
 leftmost, rightmost :: a -> (k -> v -> a) -> Node k v -> a
 leftmost  = extremity ileft

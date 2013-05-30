@@ -301,26 +301,23 @@ findWithDefault d k m = lookupWith d id k m
 lookupGT :: (CritBitKey k) => k -> CritBit k v -> Maybe (k, v)
 lookupGT k (CritBit root) = go root
   where
-    go i@(Internal left right _ _)
-      | direction k i == 0 = go left
-      | otherwise          = go right
+    go i@(Internal left right _) = go (choose k i left right)
     go (Leaf lk lv)        = rewalk root
       where
         finish (Leaf _ _) = case byteCompare k lk of
                               LT -> Just (lk, lv)
                               _ -> Nothing
         finish node
-          | calcDirection nob c == 0 = Nothing
-          | otherwise                = leftmost Nothing pair node
-        rewalk i@(Internal left right byte otherBits)
-          | byte > n                     = finish i
-          | byte == n && otherBits > nob = finish i
-          | direction k i == 0       = case rewalk left of
-                                        Nothing -> leftmost Nothing pair right
-                                        wat     -> wat
-          | otherwise                    = rewalk right
-        rewalk i                         = finish i
-        (n, nob, c) = followPrefixes k lk
+          | calcDirection n c == 0 = Nothing
+          | otherwise              = leftmost Nothing pair node
+        rewalk i@(Internal left right bit)
+          | bit > n            = finish i
+          | direction k i == 0 = case rewalk left of
+                                   Nothing -> leftmost Nothing pair right
+                                   wat     -> wat
+          | otherwise          = rewalk right
+        rewalk i               = finish i
+        (n, c) = followPrefixes k lk
         pair a b = Just (a, b)
     go Empty = Nothing
 {-# INLINABLE lookupGT #-}
@@ -359,7 +356,7 @@ singleton k v = CritBit (Leaf k v)
 size :: CritBit k v -> Int
 size (CritBit root) = go root
   where
-    go (Internal l r _ _) = go l + go r
+    go (Internal l r _) = go l + go r
     go (Leaf _ _) = 1
     go Empty      = 0
 
@@ -407,10 +404,10 @@ foldlWithKey' f z m = foldlWithKeyWith seq f z m
 foldlWithKeyWith :: (a -> a -> a) -> (a -> k -> v -> a) -> a -> CritBit k v -> a
 foldlWithKeyWith maybeSeq f z0 (CritBit root) = go z0 root
   where
-    go z (Internal left right _ _) = let z' = go z left
-                                     in z' `maybeSeq` go z' right
-    go z (Leaf k v)                = f z k v
-    go z Empty                     = z
+    go z (Internal left right _) = let z' = go z left
+                                   in z' `maybeSeq` go z' right
+    go z (Leaf k v)              = f z k v
+    go z Empty                   = z
 {-# INLINE foldlWithKeyWith #-}
 
 -- | /O(n)/. Fold the values in the map using the given
@@ -455,10 +452,10 @@ foldrWithKey' f z m = foldrWithKeyWith seq f z m
 foldrWithKeyWith :: (a -> a -> a) -> (k -> v -> a -> a) -> a -> CritBit k v -> a
 foldrWithKeyWith maybeSeq f z0 (CritBit root) = go root z0
   where
-    go (Internal left right _ _) z = let z' = go right z
-                                     in z' `maybeSeq` go left z'
-    go (Leaf k v) z                = f k v z
-    go Empty z                     = z
+    go (Internal left right _) z = let z' = go right z
+                                   in z' `maybeSeq` go left z'
+    go (Leaf k v) z              = f k v z
+    go Empty z                   = z
 {-# INLINE foldrWithKeyWith #-}
 
 -- | /O(n)/. Return all the elements of the map in ascending order of
@@ -485,7 +482,7 @@ assocs m = toAscList m
 keys :: CritBit k v -> [k]
 keys (CritBit root) = go root []
   where
-    go (Internal left right _ _) acc = go left $ go right acc
+    go (Internal left right _) acc = go left $ go right acc
     go (Leaf k _) acc = k : acc
     go Empty acc = acc
 {-# INLINABLE keys #-}
@@ -620,40 +617,36 @@ binarySetOpWithKey left both (CritBit lt) (CritBit rt) = CritBit $ top lt rt
                        Just v  -> Leaf ak v
                        Nothing -> Empty
         | otherwise = left a
-    go a@(Leaf _ _) ak b@(Internal _ _ _ _) bk =
+    go a@(Leaf _ _) ak b@(Internal _ _ _) bk =
       leaf a b bk (splitB a ak b bk) (left a)
-    go a@(Internal _ _ _ _) ak b@(Leaf _ _) bk =
+    go a@(Internal _ _ _) ak b@(Leaf _ _) bk =
       leaf b a ak (splitA a ak b bk) (left a)
-    go a@(Internal al ar abyte abits) ak b@(Internal bl br bbyte bbits) bk =
-      case compare (abyte, abits) (bbyte, bbits) of
+    go a@(Internal al ar abits) ak b@(Internal bl br bbits) bk =
+      case compare abits bbits of
         LT -> splitA a ak b bk
         GT -> splitB a ak b bk
         EQ -> link a (go al ak bl bk) (go ar (minKey ar) br (minKey br))
     -- Assumes that empty nodes exist only on the top level
     go _ _ _ _ = error("Data.CritBit.Tree.binarySetOpWithKey.go: Empty")
 
-    leaf (Leaf lk _) (Internal _ _ sbyte sbits) sk before after =
-        if dbyte > sbyte || dbyte == sbyte && dbits >= sbits
-        then before
-        else after
+    leaf (Leaf lk _) (Internal _ _ sbits) sk before after =
+        if dbits >= sbits then before else after
       where
-        (dbyte, dbits, _) = followPrefixes lk sk
+        (dbits, _) = followPrefixes lk sk
     leaf _ _ _ _ _ =
         error("Data.CritBit.Tree.binarySetOpWithKey.leaf: unpossible")
     {-# INLINE leaf #-}
 
-    switch k n a0 b0 a1 b1 = if direction k n == 0
-                             then link n a0 b0
-                             else link n a1 b1
+    switch k n a0 b0 a1 b1 = choose k n (link n a0 b0) (link n a1 b1)
     {-# INLINE switch #-}
 
-    splitA a@(Internal al ar _ _) ak b bk =
+    splitA a@(Internal al ar _) ak b bk =
         switch bk a (go al ak b bk) (left ar) (left al) (go ar (minKey ar) b bk)
     splitA _ _ _ _ =
         error("Data.CritBit.Tree.binarySetOpWithKey.splitA: unpossible")
     {-# INLINE splitA #-}
 
-    splitB a ak b@(Internal bl br _ _) bk =
+    splitB a ak b@(Internal bl br _) bk =
         switch ak b (go a ak bl bk) Empty Empty (go a ak br (minKey br))
     splitB _ _ _ _ =
         error("Data.CritBit.Tree.binarySetOpWithKey.splitB: unpossible")
@@ -666,7 +659,7 @@ binarySetOpWithKey left both (CritBit lt) (CritBit rt) = CritBit $ top lt rt
 
     link _ Empty b = b
     link _ a Empty = a
-    link (Internal _ _ byte bits) a b = Internal a b byte bits
+    link (Internal _ _ bits) a b = Internal a b bits
     link _ _ _ = error("Data.CritBit.Tree.differenceWithKey.link: unpossible")
     {-# INLINE link #-}
 {-# INLINEABLE binarySetOpWithKey #-}
@@ -719,13 +712,14 @@ filter p = filterWithKey (\_ -> p)
 --
 -- > filterWithKey (\k _ -> k > "4") (fromList [("5","a"), ("3","b")]) == fromList[("5","a")]
 filterWithKey :: (k -> v -> Bool) -> CritBit k v -> CritBit k v
-filterWithKey p (CritBit root)    = CritBit $ fromMaybe Empty (go root)
-  where go i@(Internal l r _ _)   = liftA2 modInternal ml mr <|> (ml <|> mr)
-          where modInternal nl nr = i { ileft = nl, iright = nr }
-                ml = go l
-                mr = go r
-        go l@(Leaf k v)           = guard (p k v) *> pure l
-        go Empty                  = Nothing
+filterWithKey p (CritBit root) = CritBit $ fromMaybe Empty (go root)
+  where
+    go i@(Internal l r _) = liftA2 modInternal ml mr <|> (ml <|> mr)
+      where modInternal nl nr = i { ileft = nl, iright = nr }
+            ml = go l
+            mr = go r
+    go l@(Leaf k v)       = guard (p k v) *> pure l
+    go Empty              = Nothing
 {-# INLINABLE filterWithKey #-}
 
 -- | /O(n)/. Map keys\/values and collect the 'Just' results.
@@ -735,7 +729,7 @@ filterWithKey p (CritBit root)    = CritBit $ fromMaybe Empty (go root)
 mapMaybeWithKey :: (k -> v -> Maybe v') -> CritBit k v -> CritBit k v'
 mapMaybeWithKey f (CritBit root) = CritBit $ go root
   where
-    go i@(Internal l r _ _) =
+    go i@(Internal l r _) =
       case (go l, go r) of
         (m, Empty) -> m
         (Empty, m) -> m
@@ -758,7 +752,7 @@ mapEitherWithKey :: (k -> v -> Either v1 v2)
                  -> CritBit k v -> (CritBit k v1, CritBit k v2)
 mapEitherWithKey f (CritBit root) = (CritBit *** CritBit) $ go root
   where
-    go i@(Internal l r _ _) = (merge m1 m3, merge m2 m4)
+    go i@(Internal l r _) = (merge m1 m3, merge m2 m4)
       where
         ((m1,m2),(m3,m4)) = (go l, go r)
         merge m Empty = m
@@ -784,7 +778,7 @@ split :: (CritBitKey k) => k -> CritBit k v -> (CritBit k v, CritBit k v)
 -- in terms of 'splitLookup'.
 split k (CritBit root) = (\(ln,rn) -> (CritBit ln, CritBit rn)) $ go root
   where
-    go i@(Internal left right _ _)
+    go i@(Internal left right _)
       | direction k i == 0 = case go left of
                                (lt,Empty) -> (lt, right)
                                (lt,l)     -> (lt, i { ileft = l })
@@ -812,7 +806,7 @@ splitLookup :: (CritBitKey k) => k -> CritBit k v
 splitLookup k (CritBit root) =
   (\(ln,res,rn) -> (CritBit ln, res, CritBit rn)) $ go root
   where
-    go i@(Internal left right _ _)
+    go i@(Internal left right _)
       | direction k i == 0 = case go left of
                                (lt,res,Empty) -> (lt, res, right)
                                (lt,res,l)     -> (lt, res, i { ileft = l })
@@ -873,10 +867,10 @@ deleteMax m = updateExtremity goRight (const (const Nothing)) m
 deleteFindMin :: CritBit k v -> ((k, v), CritBit k v)
 deleteFindMin (CritBit root)   = let (km, r) = go root in (km, CritBit r)
   where
-    go (Internal (Leaf k v) r _ _) = ((k, v), r)
-    go i@(Internal left _ _ _)     = (kmin, i { ileft = newLeft })
-        where (kmin, newLeft)      = go left
-    go (Leaf k v)                  = ((k, v), Empty)
+    go (Internal (Leaf k v) r _) = ((k, v), r)
+    go i@(Internal left _ _)     = (kmin, i { ileft = newLeft })
+        where (kmin, newLeft)    = go left
+    go (Leaf k v)                = ((k, v), Empty)
     go _ = error $ "CritBit.deleteFindMin: can not return the minimal element \
                    \of an empty map"
 {-# INLINABLE deleteFindMin #-}
@@ -888,10 +882,10 @@ deleteFindMin (CritBit root)   = let (km, r) = go root in (km, CritBit r)
 deleteFindMax :: CritBit k v -> ((k, v), CritBit k v)
 deleteFindMax (CritBit root) = let (km, r) = go root in (km, CritBit r)
   where
-    go (Internal l (Leaf k v) _ _) = ((k, v), l)
-    go i@(Internal _ right _ _)    = (kmin, i { iright = newRight })
-      where (kmin, newRight)       = go right
-    go (Leaf k v)                  = ((k, v), Empty)
+    go (Internal l (Leaf k v) _) = ((k, v), l)
+    go i@(Internal _ right _)    = (kmin, i { iright = newRight })
+      where (kmin, newRight)     = go right
+    go (Leaf k v)                = ((k, v), Empty)
     go _ = error "CritBit.deleteFindMax: can not return the maximal element \
                   \of an empty map"
 {-# INLINABLE deleteFindMax #-}
@@ -1025,9 +1019,9 @@ insertWith f = insertWithKey (\_ v v' -> f v v')
 mapWithKey :: (CritBitKey k) => (k -> v -> w) -> CritBit k v -> CritBit k w
 mapWithKey f (CritBit root) = CritBit (go root)
   where
-    go i@(Internal l r _ _) = i { ileft = go l, iright = go r }
-    go (Leaf k v)           = Leaf k (f k v)
-    go  Empty               = Empty
+    go i@(Internal l r _) = i { ileft = go l, iright = go r }
+    go (Leaf k v)         = Leaf k (f k v)
+    go  Empty             = Empty
 {-# INLINABLE mapWithKey #-}
 
 -- | /O(n)/. The function 'mapAccumRWithKey' threads an accumulating
@@ -1036,12 +1030,11 @@ mapAccumRWithKey :: (CritBitKey k) => (a -> k -> v -> (a, w)) -> a
                  -> CritBit k v -> (a, CritBit k w)
 mapAccumRWithKey f start (CritBit root) = second CritBit (go start root)
   where
-    go a i@(Internal l r _ _) = let (a0, r')  = go a r
-                                    (a1, l')  = go a0 l
-                                in (a1, i { ileft = l', iright = r' })
-
-    go a (Leaf k v)           = let (a0, w) = f a k v in (a0, Leaf k w)
-    go a Empty                = (a, Empty)
+    go a i@(Internal l r _) = let (a0, r')  = go a r
+                                  (a1, l')  = go a0 l
+                              in (a1, i { ileft = l', iright = r' })
+    go a (Leaf k v)         = let (a0, w) = f a k v in (a0, Leaf k w)
+    go a Empty              = (a, Empty)
 {-# INLINABLE mapAccumRWithKey #-}
 
 -- | /O(n)/. That is, behaves exactly like a regular 'traverse' except
@@ -1057,10 +1050,10 @@ traverseWithKey :: (CritBitKey k, Applicative t)
                 -> t (CritBit k w)
 traverseWithKey f (CritBit root) = fmap CritBit (go root)
   where
-    go i@(Internal l r _ _) = let constr l' r' = i { ileft = l', iright = r' }
-                              in constr <$> go l <*> go r
-    go (Leaf k v)           = (Leaf k) <$> f k v
-    go Empty                = pure Empty
+    go i@(Internal l r _) = let constr l' r' = i { ileft = l', iright = r' }
+                            in constr <$> go l <*> go r
+    go (Leaf k v)         = (Leaf k) <$> f k v
+    go Empty              = pure Empty
 {-# INLINABLE traverseWithKey #-}
 
 -- | /O(n)/. The function 'mapAccum' threads an accumulating
@@ -1088,9 +1081,9 @@ mapAccumWithKey :: (CritBitKey k)
                 -> (a, CritBit k w)
 mapAccumWithKey f start (CritBit root) = second CritBit (go start root)
   where
-    go a i@(Internal l r _ _) = let (a0, l')  = go a l
-                                    (a1, r')  = go a0 r
-                                in (a1, i { ileft = l', iright = r' })
+    go a i@(Internal l r _) = let (a0, l')  = go a l
+                                  (a1, r')  = go a0 r
+                              in (a1, i { ileft = l', iright = r' })
 
     go a (Leaf k v)           = let (a0, w) = f a k v in (a0, Leaf k w)
     go a Empty                = (a, Empty)
@@ -1115,17 +1108,14 @@ alter :: (CritBitKey k)
 {-# INLINABLE alter #-}
 alter f !k (CritBit root) = CritBit . go $ root
   where
-    go i@(Internal l r _ _)
-      | direction k i == 0 = go l
-      | otherwise           = go r
-    go (Leaf lk _)          = rewalk root
+    go i@(Internal l r _) = go (choose k i l r)
+    go (Leaf lk _)        = rewalk root
       where
-        (n,nob,c)  = followPrefixes k lk
-        dir        = calcDirection nob c
+        (n, c)  = followPrefixes k lk
+        dir        = calcDirection n c
 
-        rewalk i@(Internal left right byte otherBits)
-          | byte > n                     = finish i
-          | byte == n && otherBits > nob = finish i
+        rewalk i@(Internal left right bits)
+          | bits > n           = finish i
           | direction k i == 0 = case rewalk left of
                                    Empty -> right
                                    nd    -> i { ileft  = nd }
@@ -1138,6 +1128,6 @@ alter f !k (CritBit root) = CritBit . go $ root
           | k == lk   = maybe Empty (Leaf k) . f $ Just v
         finish i      = maybe i (ins . Leaf k) . f $ Nothing
             where ins leaf
-                    | dir == 0  = Internal i leaf n nob
-                    | otherwise = Internal leaf i n nob
+                    | dir == 0  = Internal i leaf n
+                    | otherwise = Internal leaf i n
     go _ = maybe Empty (Leaf k) $ f Nothing

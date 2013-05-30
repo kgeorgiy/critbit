@@ -10,7 +10,6 @@ module Data.CritBit.Types.Internal
     (
       CritBitKey(..)
     , CritBit(..)
-    , BitMask
     , Node(..)
     , toList
     ) where
@@ -22,24 +21,16 @@ import Data.Foldable (Foldable, foldMap)
 import Data.Monoid (Monoid(..))
 import Data.Text ()
 import Data.Text.Internal (Text(..))
-import Data.Word (Word16)
+import Data.Word (Word32, Word16)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Unsafe as B
 import qualified Data.Text.Array as T
 
-type BitMask = Word16
-
 data Node k v =
     Internal {
       ileft, iright :: !(Node k v)
-    , ibyte         :: !Int
-    -- ^ The byte at which the left and right subtrees differ.
-    , iotherBits    :: !BitMask
-    -- ^ The bitmask representing the critical bit within the
-    -- differing byte. If the critical bit is e.g. 0x8, the bitmask
-    -- will have every bit other than 0x8 set, hence 0x1F7
-    -- (the ninth bit is set because we're using 9 bits for representing
-    -- bytes).
+    , ibit          :: !Word32
+    -- ^ The bit at which the left and right subtrees differ.
     }
     | Leaf k v
     | Empty
@@ -52,19 +43,19 @@ data Node k v =
       deriving (Eq, Show)
 
 instance (NFData k, NFData v) => NFData (Node k v) where
-    rnf (Internal l r _ _) = rnf l `seq` rnf r
-    rnf (Leaf k v)         = rnf k `seq` rnf v
-    rnf Empty              = ()
+    rnf (Internal l r _) = rnf l `seq` rnf r
+    rnf (Leaf k v)       = rnf k `seq` rnf v
+    rnf Empty            = ()
 
 instance Functor (Node k) where
-    fmap f i@(Internal l r _ _) = i { ileft = fmap f l, iright = fmap f r }
-    fmap f (Leaf k v)           = Leaf k (f v)
-    fmap _ Empty                = Empty
+    fmap f i@(Internal l r _) = i { ileft = fmap f l, iright = fmap f r }
+    fmap f (Leaf k v)         = Leaf k (f v)
+    fmap _ Empty              = Empty
 
 instance Foldable (Node k) where
-    foldMap f (Internal l r _ _) = mappend (foldMap f l) (foldMap f r)
-    foldMap f (Leaf _ v)         = f v
-    foldMap _ Empty              = mempty
+    foldMap f (Internal l r _) = mappend (foldMap f l) (foldMap f r)
+    foldMap f (Leaf _ v)       = f v
+    foldMap _ Empty            = mempty
 
 -- | A crit-bit tree.
 newtype CritBit k v = CritBit {
@@ -84,7 +75,7 @@ instance (Show k, Show v) => Show (CritBit k v) where
 -- Without this trick, the critical bit calculations would fail on
 -- zero bytes /within/ a string, and our tree would be unable to
 -- handle arbitrary binary data.
-class (Eq k) => CritBitKey k where
+class (Eq k, Show k) => CritBitKey k where
     -- | Return the number of bytes used by this key.
     --
     -- For reasonable performance, implementations must be inlined and
@@ -128,6 +119,6 @@ instance CritBitKey Text where
 toList :: CritBit k v -> [(k, v)]
 toList (CritBit root) = go root []
   where
-    go (Internal l r _ _) next = go l (go r next)
-    go (Leaf k v) next         = (k,v) : next
-    go Empty next              = next
+    go (Internal l r _) next = go l (go r next)
+    go (Leaf k v) next       = (k,v) : next
+    go Empty next            = next
