@@ -32,6 +32,7 @@ module Data.CritBit.Core
     , setLeft
     , setRight
     , (.!)
+    , findAndReplace
     ) where
 
 import Data.Bits ((.|.), (.&.), complement, shiftR, xor)
@@ -93,7 +94,7 @@ lookupWith notFound found k (CritBit root) = go root
     go _                     = notFound
 {-# INLINE lookupWith #-}
 
--- | /O(log n)/. Lookup and update; see also 'updateWithKey'.
+-- | /O(k)/. Lookup and update; see also 'updateWithKey'.
 -- This function returns the changed value if it is updated, or
 -- the original value if the entry is deleted.
 --
@@ -103,25 +104,25 @@ lookupWith notFound found k (CritBit root) = go root
 -- > updateLookupWithKey f "b" (fromList [("a",5), ("b",3)]) == (Just 3, singleton "a" 5)
 updateLookupWithKey :: (CritBitKey k) => (k -> v -> Maybe v) -> k
                        -> CritBit k v -> (Maybe v, CritBit k v)
--- Once again with the continuations! It's somewhat faster to do
--- things this way than to expicitly unwind our recursion once we've
--- found the leaf to delete. It's also a ton less code.
---
--- (If you want a good little exercise, rewrite this function without
--- using continuations, and benchmark the two versions.)
-updateLookupWithKey f k t@(CritBit root) = go root CritBit
+updateLookupWithKey f k t = findAndReplace (Nothing, t) found k t
+  where
+    found v cont = case f k v of
+                     Just v'  -> (Just v', cont $ Leaf k v')
+                     Nothing  -> (Just v , cont Empty)
+{-# INLINABLE updateLookupWithKey #-}
+
+findAndReplace :: CritBitKey k => t -> (v -> (Node k v -> CritBit k v) -> t)
+               -> k -> CritBit k v -> t
+findAndReplace notFound found k (CritBit root) = go root CritBit
   where
     go i@(Internal left right _ _) cont
-      | direction k i == 0 = go left  $ cont .! setLeft i
+      | direction k i == 0 = go left  $ cont .! setLeft  i
       | otherwise          = go right $ cont .! setRight i
     go (Leaf lk lv) cont
-      | k == lk   = case f lk lv of
-                      Just lv' -> (Just lv', cont $ Leaf lk lv')
-                      Nothing  -> (Just lv , cont Empty)
-      | otherwise = (Nothing, t)
-    go Empty _ = (Nothing, t)
-    {-# INLINE go #-}
-{-# INLINABLE updateLookupWithKey #-}
+      | k == lk   = found lv cont
+      | otherwise = notFound
+    go Empty _ = notFound
+{-# INLINE findAndReplace #-}
 
 infixr 9 .!
 (.!) :: (b -> c) -> (a -> b) -> a -> c

@@ -250,21 +250,7 @@ lookup k m = lookupWith Nothing Just k m
 -- > delete "c" (fromList [("a",5), ("b",3)]) == fromList [("a",5), ("b",3)]
 -- > delete "a" empty                         == empty
 delete :: (CritBitKey k) => k -> CritBit k v -> CritBit k v
-delete k t@(CritBit root) = go root CritBit
-  where
-    go i@(Internal left right _ _) cont
-      | direction k i == 0 = case left of
-                               Leaf lk _
-                                 | lk == k   -> cont right
-                                 | otherwise -> t
-                               _ -> go left $ cont .! setLeft i
-      | otherwise          = case right of
-                               Leaf lk _
-                                 | lk == k   -> cont left
-                                 | otherwise -> t
-                               _ -> go right $ cont .! setRight i
-    go (Leaf lk _) _ | k == lk = empty
-    go _ _ = t
+delete k t = findAndReplace t (const ($ Empty)) k t
 {-# INLINABLE delete #-}
 
 -- | /O(log n)/. The expression (@'update' f k map@ updates the value @x@
@@ -1252,7 +1238,7 @@ maxView :: CritBit k v -> Maybe (v, CritBit k v)
 maxView = fmap (first snd) . maxViewWithKey
 {-# INLINABLE maxView #-}
 
--- | /O(log n)/. Retrieves the minimal (key,value) pair of the map, and
+-- | /O(k)/. Retrieves the minimal (key,value) pair of the map, and
 -- the map stripped of that element, or 'Nothing' if passed an empty map.
 --
 -- > minViewWithKey (fromList [("a",5), ("b",3)]) == Just (("a",5), fromList [("b",3)])
