@@ -818,8 +818,7 @@ minKey n = leftmost
 {-# INLINE minKey #-}
 
 -- | Link children to the parent node.
-link :: (CritBitKey k)
-     => Node k v -- ^ parent
+link :: Node k v -- ^ parent
      -> Node k w -- ^ left child
      -> Node k w -- ^ right child
      -> Node k w
@@ -978,9 +977,8 @@ filter p = filterWithKey (\_ -> p)
 -- > filterWithKey (\k _ -> k > "4") (fromList [("5","a"), ("3","b")]) == fromList[("5","a")]
 filterWithKey :: (k -> v -> Bool) -> CritBit k v -> CritBit k v
 filterWithKey p (CritBit root)    = CritBit $ fromMaybe Empty (go root)
-  where go i@(Internal l r _ _)   = liftA2 modInternal ml mr <|> (ml <|> mr)
-          where modInternal nl nr = i { ileft = nl, iright = nr }
-                ml = go l
+  where go i@(Internal l r _ _)   = liftA2 (link i) ml mr <|> (ml <|> mr)
+          where ml = go l
                 mr = go r
         go l@(Leaf k v)           = guard (p k v) *> pure l
         go Empty                  = Nothing
@@ -993,11 +991,7 @@ filterWithKey p (CritBit root)    = CritBit $ fromMaybe Empty (go root)
 mapMaybeWithKey :: (k -> v -> Maybe v') -> CritBit k v -> CritBit k v'
 mapMaybeWithKey f (CritBit root) = CritBit $ go root
   where
-    go i@(Internal l r _ _) =
-      case (go l, go r) of
-        (m, Empty) -> m
-        (Empty, m) -> m
-        (m1,   m2) -> i { ileft = m1, iright = m2 }
+    go i@(Internal l r _ _) = link i (go l) (go r)
     go (Leaf k v) = case f k v of
                       Nothing -> Empty
                       Just v' -> Leaf k v'
@@ -1016,12 +1010,9 @@ mapEitherWithKey :: (k -> v -> Either v1 v2)
                  -> CritBit k v -> (CritBit k v1, CritBit k v2)
 mapEitherWithKey f (CritBit root) = (CritBit *** CritBit) $ go root
   where
-    go i@(Internal l r _ _) = (merge m1 m3, merge m2 m4)
+    go i@(Internal l r _ _) = (link i m1 m3, link i m2 m4)
       where
-        ((m1,m2),(m3,m4)) = (go l, go r)
-        merge m Empty = m
-        merge Empty m = m
-        merge m m'    = i { ileft = m, iright = m' }
+        ((m1,m2),(m3,m4)) = (go l,go r)
     go (Leaf k v) = case f k v of
                       Left  v' -> (Leaf k v', Empty)
                       Right v' -> (Empty, Leaf k v')
@@ -1366,7 +1357,7 @@ insertWith f = insertWithKey (\_ v v' -> f v v')
 mapWithKey :: (CritBitKey k) => (k -> v -> w) -> CritBit k v -> CritBit k w
 mapWithKey f (CritBit root) = CritBit (go root)
   where
-    go i@(Internal l r _ _) = i { ileft = go l, iright = go r }
+    go i@(Internal l r _ _) = link i (go l) (go r)
     go (Leaf k v)           = Leaf k (f k v)
     go  Empty               = Empty
 {-# INLINABLE mapWithKey #-}
@@ -1379,7 +1370,7 @@ mapAccumRWithKey f start (CritBit root) = second CritBit (go start root)
   where
     go a i@(Internal l r _ _) = let (a0, r')  = go a r
                                     (a1, l')  = go a0 l
-                                in (a1, i { ileft = l', iright = r' })
+                                in (a1, link i l' r')
 
     go a (Leaf k v)           = let (a0, w) = f a k v in (a0, Leaf k w)
     go a Empty                = (a, Empty)
@@ -1398,8 +1389,7 @@ traverseWithKey :: (CritBitKey k, Applicative t)
                 -> t (CritBit k w)
 traverseWithKey f (CritBit root) = fmap CritBit (go root)
   where
-    go i@(Internal l r _ _) = let constr l' r' = i { ileft = l', iright = r' }
-                              in constr <$> go l <*> go r
+    go i@(Internal l r _ _) = link i <$> go l <*> go r
     go (Leaf k v)           = (Leaf k) <$> f k v
     go Empty                = pure Empty
 {-# INLINABLE traverseWithKey #-}
@@ -1431,7 +1421,7 @@ mapAccumWithKey f start (CritBit root) = second CritBit (go start root)
   where
     go a i@(Internal l r _ _) = let (a0, l')  = go a l
                                     (a1, r')  = go a0 r
-                                in (a1, i { ileft = l', iright = r' })
+                                in (a1, link i l' r')
 
     go a (Leaf k v)           = let (a0, w) = f a k v in (a0, Leaf k w)
     go a Empty                = (a, Empty)
@@ -1495,14 +1485,10 @@ partitionWithKey f (CritBit root) = CritBit *** CritBit $ go root
     go l@(Leaf k v)
       | f k v     = (l,Empty)
       | otherwise = (Empty,l)
-    go i@(Internal left right _ _) = (join l1 r1, join l2 r2)
+    go i@(Internal left right _ _) = (link i l1 r1, link i l2 r2)
       where
         (!l1,!l2) = go left
         (!r1,!r2) = go right
-
-        join Empty r = r
-        join l Empty = l
-        join l r     = i { ileft = l, iright = r }
     go _ = (Empty,Empty)
 {-# INLINABLE partitionWithKey #-}
 
