@@ -353,11 +353,9 @@ lookupLE k r = lookupOrd (GT /=) k r
 
 -- | /O(k)/. Common part of lookupXX functions.
 lookupOrd :: (CritBitKey k) => (Ordering -> Bool) -> k -> CritBit k v -> Maybe (k, v)
-lookupOrd accepts k (CritBit root) = go root
+lookupOrd accepts k (CritBit root) = findLeaf Nothing found k root
   where
-    go Empty = Nothing
-    go i@(Internal left right _ _) = go $ choose k i left right
-    go (Leaf lk lv)        = rewalk root
+    found lk lv = rewalk root
       where
         finish (Leaf _ _)
           | accepts (byteCompare lk k) = Just (lk, lv)
@@ -775,7 +773,7 @@ binarySetOpWithKey left both (CritBit lt) (CritBit rt) = CritBit $ top lt rt
 -- | Detect whether branch in 'Internal' node comes 'before' or
 -- 'after' branch initiated by 'Leaf'.
 leafBranch :: CritBitKey k => Node k v -> Node k w -> k -> t -> t -> t
-leafBranch (Leaf lk _) i@(Internal{}) sk before after = 
+leafBranch (Leaf lk _) i@(Internal{}) sk before after =
   select dbyte dbits i after before
   where (dbyte, dbits, _) = followPrefixes lk sk
 leafBranch _ _ _ _ _ = error "Data.CritBit.Tree.leafBranch: unpossible"
@@ -1407,15 +1405,15 @@ alter :: (CritBitKey k)
       -> CritBit k v
       -> CritBit k v
 {-# INLINABLE alter #-}
-alter f !k (CritBit root) = CritBit . go $ root
+alter f !k (CritBit root) = CritBit $ findLeaf
+   (maybe Empty (Leaf k) $ f Nothing) found k root
   where
-    go i@(Internal l r _ _) = go $ choose k i l r
-    go (Leaf lk _)          = rewalk root
+    found lk _ = rewalk root
       where
         (n,nob,c)  = followPrefixes k lk
         dir        = calcDirection nob c
 
-        rewalk i@(Internal left right _ _) = 
+        rewalk i@(Internal left right _ _) =
           select n nob i (finish i)
                          (choose k i (setLeft  i $ rewalk left)
                                      (setRight i $ rewalk right))
@@ -1427,7 +1425,6 @@ alter f !k (CritBit root) = CritBit . go $ root
             where ins leaf
                     | dir == 0  = Internal i leaf n nob
                     | otherwise = Internal leaf i n nob
-    go _ = maybe Empty (Leaf k) $ f Nothing
 
 -- | /O(n)/. Partition the map according to a predicate. The first
 -- map contains all elements that satisfy the predicate, the second all

@@ -27,6 +27,7 @@ module Data.CritBit.Core
     , calcDirection
     , choose
     , select
+    , findLeaf
     , followPrefixes
     , followPrefixesFrom
     , followPrefixesByteFrom
@@ -53,10 +54,9 @@ import Data.Word (Word16)
 -- > insertWithKey f "a" 1 empty                         == singleton "a" 1
 insertWithKey :: CritBitKey k => (k -> v -> v -> v) -> k -> v -> CritBit k v
               -> CritBit k v
-insertWithKey f k v (CritBit root) = CritBit . go $ root
+insertWithKey f k v (CritBit root) = CritBit $ findLeaf (Leaf k v) found k root
   where
-    go i@(Internal left right _ _) = go $ choose k i left right
-    go (Leaf lk _)         = rewalk root
+    found lk _ = rewalk root
       where
         rewalk i@(Internal left right _ _) =
           select n nob i (finish i)
@@ -73,8 +73,14 @@ insertWithKey f k v (CritBit root) = CritBit . go $ root
 
         (n, nob, c) = followPrefixes k lk
         nd          = calcDirection nob c
-    go Empty = Leaf k v
 {-# INLINABLE insertWithKey #-}
+
+findLeaf :: CritBitKey k => a -> (k -> v -> a) -> k -> Node k v -> a
+findLeaf notFound found k node = go node
+  where
+    go i@(Internal left right _ _) = go $ choose k i left right
+    go (Leaf lk lv)                = found lk lv
+    go Empty                       = notFound
 
 lookupWith :: (CritBitKey k) =>
               a                 -- ^ Failure continuation
