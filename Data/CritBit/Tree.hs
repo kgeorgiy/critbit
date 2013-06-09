@@ -1017,16 +1017,12 @@ split :: (CritBitKey k) => k -> CritBit k v -> (CritBit k v, CritBit k v)
 split k (CritBit root) = (\(ln,rn) -> (CritBit ln, CritBit rn)) $ go root
   where
     go i@(Internal left right _ _)
-      | direction k i == 0 = case go left of
-                               (lt,Empty) -> (lt, right)
-                               (lt,l)     -> (lt, setLeft i l)
-      | otherwise          = case go right of
-                               (Empty,gt) -> (left, gt)
-                               (r,gt)     -> (setRight i r, gt)
-    go (Leaf lk lv) =
+      | direction k i == 0 = second (setLeft  i) $ go left
+      | otherwise          = first  (setRight i) $ go right
+    go l@(Leaf lk _) =
       case byteCompare lk k of
-        LT -> ((Leaf lk lv), Empty)
-        GT -> (Empty, (Leaf lk lv))
+        LT -> (l, Empty)
+        GT -> (Empty, l)
         EQ -> (Empty, Empty)
     go _ = (Empty,Empty)
 {-# INLINABLE split #-}
