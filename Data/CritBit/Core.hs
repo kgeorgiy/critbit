@@ -106,39 +106,35 @@ updateLookupWithKey :: (CritBitKey k) => (k -> v -> Maybe v) -> k
 --
 -- (If you want a good little exercise, rewrite this function without
 -- using continuations, and benchmark the two versions.)
-updateLookupWithKey f k t@(CritBit root) = top root
+updateLookupWithKey f k t@(CritBit root) = go root CritBit
   where
-    top i@(Internal left right _ _) = go i left right CritBit
-    top (Leaf lk lv) | k == lk =
-      maybeUpdate lk lv (\v -> CritBit $ Leaf lk v) (CritBit Empty)
-    top _ = (Nothing, t)
-
-    go i left right cont
-      | direction k i == 0 =
-        case left of
-          i'@(Internal left' right' _ _) ->
-            go i' left' right' $ \l -> cont $! i { ileft = l }
-          Leaf lk lv -> maybeUpdate lk lv
-                        (\v -> cont $! i { ileft = (Leaf lk v) })
-                        (cont right)
-          _ -> error "Data.CritBit.Core.updateLookupWithKey: Empty in tree."
-      | otherwise =
-        case right of
-          i'@(Internal left' right' _ _) ->
-            go i' left' right' $ \r -> cont $! i { iright = r }
-          Leaf lk lv -> maybeUpdate lk lv
-                        (\v -> cont $! i { iright = (Leaf lk v) })
-                        (cont left)
-          _ -> error "Data.CritBit.Core.updateLookupWithKey: Empty in tree."
-
-    maybeUpdate lk lv c1 c2
-      | k == lk = case f lk lv of
-                    Just lv' -> (Just lv', c1 lv')
-                    Nothing  -> (Just lv, c2)
+    go i@(Internal left right _ _) cont
+      | direction k i == 0 = go left  $ cont .! setLeft i
+      | otherwise          = go right $ cont .! setRight i
+    go (Leaf lk lv) cont
+      | k == lk   = case f lk lv of
+                      Just lv' -> (Just lv', cont $ Leaf lk lv')
+                      Nothing  -> (Just lv , cont Empty)
       | otherwise = (Nothing, t)
-    {-# INLINE maybeUpdate #-}
-
+    go Empty _ = (Nothing, t)
+    {-# INLINE go #-}
 {-# INLINABLE updateLookupWithKey #-}
+
+infixr 9 .!
+(.!) :: (b -> c) -> (a -> b) -> a -> c
+(.!) f g x = f $! g $! x
+
+setLeft :: (CritBitKey k) => Node k v -> Node k v -> Node k v
+setLeft i@(Internal{}) Empty = iright i
+setLeft i@(Internal{}) node  = i { ileft = node }
+setLeft _ _ = error "Data.CritBit.Core.setLeft: Non-internal node"
+{-# INLINE setLeft #-}
+
+setRight :: (CritBitKey k) => Node k v -> Node k v -> Node k v
+setRight i@(Internal{}) Empty = ileft i
+setRight i@(Internal{}) node  = i { iright = node }
+setRight _ _ = error "Data.CritBit.Core.setRight: Non-internal node"
+{-# INLINE setRight #-}
 
 -- | Determine which direction we should move down the tree based on
 -- the critical bitmask at the current node and the corresponding byte
