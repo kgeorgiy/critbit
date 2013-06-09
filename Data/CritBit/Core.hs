@@ -29,6 +29,9 @@ module Data.CritBit.Core
     , followPrefixes
     , followPrefixesFrom
     , followPrefixesByteFrom
+    , setLeft
+    , setRight
+    , (.!)
     ) where
 
 import Data.Bits ((.|.), (.&.), complement, shiftR, xor)
@@ -58,8 +61,8 @@ insertWithKey f k v (CritBit root) = CritBit . go $ root
         rewalk i@(Internal left right byte otherBits)
           | byte > n                     = finish i
           | byte == n && otherBits > nob = finish i
-          | direction k i == 0           = i { ileft = rewalk left }
-          | otherwise                    = i { iright = rewalk right }
+          | direction k i == 0           = setLeft  i $ rewalk left
+          | otherwise                    = setRight i $ rewalk right
         rewalk i                         = finish i
 
         finish (Leaf _ v') | k == lk = Leaf k (f k v v')
@@ -124,13 +127,13 @@ infixr 9 .!
 (.!) :: (b -> c) -> (a -> b) -> a -> c
 (.!) f g x = f $! g $! x
 
-setLeft :: (CritBitKey k) => Node k v -> Node k v -> Node k v
+setLeft :: Node k v -> Node k v -> Node k v
 setLeft i@(Internal{}) Empty = iright i
 setLeft i@(Internal{}) node  = i { ileft = node }
 setLeft _ _ = error "Data.CritBit.Core.setLeft: Non-internal node"
 {-# INLINE setLeft #-}
 
-setRight :: (CritBitKey k) => Node k v -> Node k v -> Node k v
+setRight :: Node k v -> Node k v -> Node k v
 setRight i@(Internal{}) Empty = ileft i
 setRight i@(Internal{}) node  = i { iright = node }
 setRight _ _ = error "Data.CritBit.Core.setRight: Non-internal node"
