@@ -25,7 +25,7 @@ module Data.CritBit.Core
     , rightmost
     -- * Internal functions
     , calcDirection
-    , direction
+    , choose
     , followPrefixes
     , followPrefixesFrom
     , followPrefixesByteFrom
@@ -54,16 +54,14 @@ insertWithKey :: CritBitKey k => (k -> v -> v -> v) -> k -> v -> CritBit k v
               -> CritBit k v
 insertWithKey f k v (CritBit root) = CritBit . go $ root
   where
-    go i@(Internal left right _ _)
-      | direction k i == 0 = go left
-      | otherwise          = go right
+    go i@(Internal left right _ _) = go $ choose k i left right
     go (Leaf lk _)         = rewalk root
       where
         rewalk i@(Internal left right byte otherBits)
           | byte > n                     = finish i
           | byte == n && otherBits > nob = finish i
-          | direction k i == 0           = setLeft  i $ rewalk left
-          | otherwise                    = setRight i $ rewalk right
+          | otherwise                    = choose k i (setLeft  i $ rewalk left )
+                                                      (setRight i $ rewalk right)
         rewalk i                         = finish i
 
         finish (Leaf _ v') | k == lk = Leaf k (f k v v')
@@ -87,9 +85,7 @@ lookupWith :: (CritBitKey k) =>
 -- algorithm with trivial variations.
 lookupWith notFound found k (CritBit root) = go root
   where
-    go i@(Internal left right _ _)
-       | direction k i == 0  = go left
-       | otherwise           = go right
+    go i@(Internal left right _ _) = go $ choose k i left right
     go (Leaf lk v) | k == lk = found v
     go _                     = notFound
 {-# INLINE lookupWith #-}
@@ -115,9 +111,9 @@ findAndReplace :: CritBitKey k => t -> (v -> (Node k v -> CritBit k v) -> t)
                -> k -> CritBit k v -> t
 findAndReplace notFound found k (CritBit root) = go root CritBit
   where
-    go i@(Internal left right _ _) cont
-      | direction k i == 0 = go left  $ cont .! setLeft  i
-      | otherwise          = go right $ cont .! setRight i
+    go i@(Internal left right _ _) cont = 
+      choose k i (go left  $ cont .! setLeft  i)
+                 (go right $ cont .! setRight i)
     go (Leaf lk lv) cont
       | k == lk   = found lv cont
       | otherwise = notFound
@@ -140,14 +136,14 @@ setRight i@(Internal{}) node  = i { iright = node }
 setRight _ _ = error "Data.CritBit.Core.setRight: Non-internal node"
 {-# INLINE setRight #-}
 
--- | Determine which direction we should move down the tree based on
--- the critical bitmask at the current node and the corresponding byte
--- in the key. Left is 0, right is 1.
-direction :: (CritBitKey k) => k -> Node k v -> Int
-direction k (Internal _ _ byte otherBits) =
-    calcDirection otherBits (getByte k byte)
-direction _ _ = error "Data.CritBit.Core.direction: unpossible!"
-{-# INLINE direction #-}
+-- | Chooses one of the values depending on the direction we should
+-- | move down the tree.
+choose :: (CritBitKey k) => k -> Node k v -> a -> a -> a
+choose k (Internal _ _ byte bits) left right
+    | calcDirection bits (getByte k byte) == 0 = left
+    | otherwise                                = right
+choose _ _ _ _ = error "Data.CritBit.Core.choose: unpossible!"
+{-# INLINE choose #-}
 
 -- Given a critical bitmask and a byte, return 0 to move left, 1 to
 -- move right.

@@ -356,9 +356,7 @@ lookupOrd :: (CritBitKey k) => (Ordering -> Bool) -> k -> CritBit k v -> Maybe (
 lookupOrd accepts k (CritBit root) = go root
   where
     go Empty = Nothing
-    go i@(Internal left right _ _)
-      | direction k i == 0 = go left
-      | otherwise          = go right
+    go i@(Internal left right _ _) = go $ choose k i left right
     go (Leaf lk lv)        = rewalk root
       where
         finish (Leaf _ _)
@@ -371,8 +369,9 @@ lookupOrd accepts k (CritBit root) = go root
         rewalk i@(Internal left right byte otherBits)
           | byte > n                     = finish i
           | byte == n && otherBits > nob = finish i
-          | direction k i == 0           = rewalk left  <|> ifGT right
-          | otherwise                    = rewalk right <|> ifLT left
+          | otherwise                    =
+              choose k i (rewalk left  <|> ifGT right)
+                         (rewalk right <|> ifLT left)
         rewalk i                         = finish i
 
         (n, nob, c) = followPrefixes k lk
@@ -789,9 +788,7 @@ leafBranch _ _ _ _ _ = error "Data.CritBit.Tree.leafBranch: unpossible"
 -- | Select child to link under node 'n' by 'k'.
 switch :: (CritBitKey k) => k -> Node k v -> Node k w -> Node k w
        -> Node k w -> Node k w -> Node k w
-switch k n a0 b0 a1 b1
-  | direction k n == 0 = link n a0 b0
-  | otherwise          = link n a1 b1
+switch k n a0 b0 a1 b1 = choose k n (link n a0 b0) (link n a1 b1)
 {-# INLINE switch #-}
 
 -- | Extract minimum key from the subtree.
@@ -1016,9 +1013,9 @@ split :: (CritBitKey k) => k -> CritBit k v -> (CritBit k v, CritBit k v)
 -- in terms of 'splitLookup'.
 split k (CritBit root) = (\(ln,rn) -> (CritBit ln, CritBit rn)) $ go root
   where
-    go i@(Internal left right _ _)
-      | direction k i == 0 = second (setLeft  i) $ go left
-      | otherwise          = first  (setRight i) $ go right
+    go i@(Internal left right _ _) = choose k i
+                                       (second (setLeft  i) $ go left)
+                                       (first  (setRight i) $ go right)
     go l@(Leaf lk _) =
       case byteCompare lk k of
         LT -> (l, Empty)
@@ -1040,13 +1037,9 @@ splitLookup :: (CritBitKey k) => k -> CritBit k v
 splitLookup k (CritBit root) =
   (\(ln,res,rn) -> (CritBit ln, res, CritBit rn)) $ go root
   where
-    go i@(Internal left right _ _)
-      | direction k i == 0 = case go left of
-                               (lt,res,Empty) -> (lt, res, right)
-                               (lt,res,l)     -> (lt, res, setLeft i l)
-      | otherwise          = case go right of
-                               (Empty,res,gt) -> (left, res, gt)
-                               (r,res,gt)     -> (setRight i r, res, gt)
+    go i@(Internal left right _ _) = choose k i
+      (let (l, m, r) = go left  in (l, m, setLeft  i r))
+      (let (l, m, r) = go right in (setRight i l, m, r))
     go (Leaf lk lv) =
       case byteCompare lk k of
         LT -> ((Leaf lk lv), Nothing, Empty)
@@ -1140,9 +1133,7 @@ submapTypeBy f (CritBit root1) (CritBit root2) = top root1 root2
 
     splitB a ak b@(Internal bl br _ _) bk = if t == No then No else Yes
       where
-        t = if direction ak b == 0
-            then go a ak bl bk
-            else go a ak br (minKey br)
+        t = choose ak b (go a ak bl bk) (go a ak br (minKey br))
 
     splitB _ _ _ _ =
         error("Data.CritBit.Tree.isSubmapOfBy.splitB: unpossible")
@@ -1424,9 +1415,7 @@ alter :: (CritBitKey k)
 {-# INLINABLE alter #-}
 alter f !k (CritBit root) = CritBit . go $ root
   where
-    go i@(Internal l r _ _)
-      | direction k i == 0 = go l
-      | otherwise           = go r
+    go i@(Internal l r _ _) = go $ choose k i l r
     go (Leaf lk _)          = rewalk root
       where
         (n,nob,c)  = followPrefixes k lk
@@ -1435,8 +1424,9 @@ alter f !k (CritBit root) = CritBit . go $ root
         rewalk i@(Internal left right byte otherBits)
           | byte > n                     = finish i
           | byte == n && otherBits > nob = finish i
-          | direction k i == 0 = setLeft  i $ rewalk left
-          | otherwise          = setRight i $ rewalk right
+          | otherwise                    = choose k i
+                                             (setLeft  i $ rewalk left)
+                                             (setRight i $ rewalk right)
         rewalk i               = finish i
 
         finish (Leaf _ v)
