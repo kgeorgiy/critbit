@@ -748,9 +748,7 @@ binarySetOpWithKey left both (CritBit lt) (CritBit rt) = CritBit $ top lt rt
     -- Each node is followed by the minimum key in that node.
     -- This trick assures that overall time spend by minKey is O(n+m).
     go a@(Leaf ak av) _ (Leaf bk bv) _
-        | ak == bk = case both ak av bv of
-                       Just v  -> Leaf ak v
-                       Nothing -> Empty
+        | ak == bk  = maybe Empty (Leaf ak) $ both ak av bv
         | otherwise = left a
     go a@(Leaf _ _) ak b@(Internal _ _ _ _) bk =
       leafBranch a b bk (splitB a ak b bk) (left a)
@@ -978,9 +976,7 @@ mapMaybeWithKey :: (k -> v -> Maybe v') -> CritBit k v -> CritBit k v'
 mapMaybeWithKey f (CritBit root) = CritBit $ go root
   where
     go i@(Internal l r _ _) = link i (go l) (go r)
-    go (Leaf k v) = case f k v of
-                      Nothing -> Empty
-                      Just v' -> Leaf k v'
+    go (Leaf k v) = maybe Empty (Leaf k) $ f k v
     go Empty      = Empty
 {-# INLINABLE mapMaybeWithKey #-}
 
