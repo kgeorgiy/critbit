@@ -366,13 +366,11 @@ lookupOrd accepts k (CritBit root) = go root
           | calcDirection nob c == 0 = ifLT node
           | otherwise                = ifGT node
 
-        rewalk i@(Internal left right byte otherBits)
-          | byte > n                     = finish i
-          | byte == n && otherBits > nob = finish i
-          | otherwise                    =
-              choose k i (rewalk left  <|> ifGT right)
-                         (rewalk right <|> ifLT left)
-        rewalk i                         = finish i
+        rewalk i@(Internal left right _ _) =
+          select n nob i (finish i)
+                         (choose k i (rewalk left  <|> ifGT right)
+                                     (rewalk right <|> ifLT left))
+        rewalk i = finish i
 
         (n, nob, c) = followPrefixes k lk
         pair a b = Just (a, b)
@@ -777,11 +775,9 @@ binarySetOpWithKey left both (CritBit lt) (CritBit rt) = CritBit $ top lt rt
 -- | Detect whether branch in 'Internal' node comes 'before' or
 -- 'after' branch initiated by 'Leaf'.
 leafBranch :: CritBitKey k => Node k v -> Node k w -> k -> t -> t -> t
-leafBranch (Leaf lk _) (Internal _ _ sbyte sbits) sk before after
-    | dbyte > sbyte || dbyte == sbyte && dbits >= sbits = before
-    | otherwise                                         = after
-  where
-    (dbyte, dbits, _) = followPrefixes lk sk
+leafBranch (Leaf lk _) i@(Internal{}) sk before after = 
+  select dbyte dbits i after before
+  where (dbyte, dbits, _) = followPrefixes lk sk
 leafBranch _ _ _ _ _ = error "Data.CritBit.Tree.leafBranch: unpossible"
 {-# INLINE leafBranch #-}
 
@@ -1116,10 +1112,8 @@ submapTypeBy f (CritBit root1) (CritBit root2) = top root1 root2
     go (Leaf ak av) _ (Leaf bk bv) _
         | ak == bk  = if f av bv then Equal else No
         | otherwise = No
-    go a@(Leaf _ _) ak b@(Internal _ _ bbyte bbits) bk =
-        if dbyte > bbyte || dbyte == bbyte && dbits >= bbits
-        then splitB a ak b bk
-        else No
+    go a@(Leaf _ _) ak b@(Internal{}) bk =
+        select dbyte dbits b No $ splitB a ak b bk
       where
         (dbyte, dbits, _) = followPrefixes ak bk
     go (Internal _ _ _ _) _ (Leaf _ _) _ = No
@@ -1421,13 +1415,11 @@ alter f !k (CritBit root) = CritBit . go $ root
         (n,nob,c)  = followPrefixes k lk
         dir        = calcDirection nob c
 
-        rewalk i@(Internal left right byte otherBits)
-          | byte > n                     = finish i
-          | byte == n && otherBits > nob = finish i
-          | otherwise                    = choose k i
-                                             (setLeft  i $ rewalk left)
-                                             (setRight i $ rewalk right)
-        rewalk i               = finish i
+        rewalk i@(Internal left right _ _) = 
+          select n nob i (finish i)
+                         (choose k i (setLeft  i $ rewalk left)
+                                     (setRight i $ rewalk right))
+        rewalk i = finish i
 
         finish (Leaf _ v)
           | k == lk   = maybe Empty (Leaf k) . f $ Just v

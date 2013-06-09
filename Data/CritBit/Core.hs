@@ -26,6 +26,7 @@ module Data.CritBit.Core
     -- * Internal functions
     , calcDirection
     , choose
+    , select
     , followPrefixes
     , followPrefixesFrom
     , followPrefixesByteFrom
@@ -57,12 +58,11 @@ insertWithKey f k v (CritBit root) = CritBit . go $ root
     go i@(Internal left right _ _) = go $ choose k i left right
     go (Leaf lk _)         = rewalk root
       where
-        rewalk i@(Internal left right byte otherBits)
-          | byte > n                     = finish i
-          | byte == n && otherBits > nob = finish i
-          | otherwise                    = choose k i (setLeft  i $ rewalk left )
-                                                      (setRight i $ rewalk right)
-        rewalk i                         = finish i
+        rewalk i@(Internal left right _ _) =
+          select n nob i (finish i)
+                         (choose k i (setLeft  i $ rewalk left )
+                                     (setRight i $ rewalk right))
+        rewalk i = finish i
 
         finish (Leaf _ v') | k == lk = Leaf k (f k v v')
         finish node
@@ -135,6 +135,16 @@ setRight i@(Internal{}) Empty = ileft i
 setRight i@(Internal{}) node  = i { iright = node }
 setRight _ _ = error "Data.CritBit.Core.setRight: Non-internal node"
 {-# INLINE setRight #-}
+
+-- | Selects one of the values depending whether split specified
+-- by `byte` and `bits` occurs before or after internal node
+-- | move down the tree.
+select :: Int -> BitMask -> Node k v -> a -> a -> a
+select byte bits (Internal _ _ nbyte nbits) before after
+    | byte < nbyte || byte == nbyte && bits < nbits = before
+    | otherwise                                     = after
+select _ _ _ _ _ = error "Data.CritBit.Core.select: unpossible!"
+{-# INLINE select #-}
 
 -- | Chooses one of the values depending on the direction we should
 -- | move down the tree.
