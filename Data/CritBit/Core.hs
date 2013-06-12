@@ -35,6 +35,8 @@ module Data.CritBit.Core
     , setRight
     , (.!)
     , findAndReplace
+    -- * Internal types
+    , Diff
     ) where
 
 import Data.Bits ((.|.), (.&.), complement, shiftR, xor)
@@ -59,9 +61,9 @@ insertWithKey f k v (CritBit root) = CritBit $ findLeaf (Leaf k v) found k root
     found lk _ = rewalk root
       where
         rewalk i@(Internal left right _ _) =
-          select n nob i (finish i)
-                         (choose k i (setLeft  i $ rewalk left )
-                                     (setRight i $ rewalk right))
+          select diff i (finish i)
+                        (choose k i (setLeft  i $ rewalk left )
+                                    (setRight i $ rewalk right))
         rewalk i = finish i
 
         finish (Leaf _ v') | k == lk = Leaf k (f k v v')
@@ -71,8 +73,8 @@ insertWithKey f k v (CritBit root) = CritBit $ findLeaf (Leaf k v) found k root
           | otherwise = Internal { ileft = Leaf k v, iright = node,
                                    ibyte = n, iotherBits = nob }
 
-        (n, nob, c) = followPrefixes k lk
-        nd          = calcDirection nob c
+        diff@(n, nob, _) = followPrefixes k lk
+        nd               = calcDirection diff
 {-# INLINABLE insertWithKey #-}
 
 findLeaf :: CritBitKey k => a -> (k -> v -> a) -> k -> Node k v -> a
@@ -142,29 +144,32 @@ setRight i@(Internal{}) node  = i { iright = node }
 setRight _ _ = error "Data.CritBit.Core.setRight: Non-internal node"
 {-# INLINE setRight #-}
 
+-- | First difference between two keys
+type Diff = (Int, BitMask, Word16)
+
 -- | Selects one of the values depending whether split specified
 -- by `byte` and `bits` occurs before or after internal node
 -- | move down the tree.
-select :: Int -> BitMask -> Node k v -> a -> a -> a
-select byte bits (Internal _ _ nbyte nbits) before after
+select :: Diff -> Node k v -> a -> a -> a
+select (!byte, !bits, _) (Internal _ _ nbyte nbits) before after
     | byte < nbyte || byte == nbyte && bits < nbits = before
     | otherwise                                     = after
-select _ _ _ _ _ = error "Data.CritBit.Core.select: unpossible!"
+select _ _ _ _ = error "Data.CritBit.Core.select: unpossible!"
 {-# INLINE select #-}
 
 -- | Chooses one of the values depending on the direction we should
 -- | move down the tree.
 choose :: (CritBitKey k) => k -> Node k v -> a -> a -> a
 choose k (Internal _ _ byte bits) left right
-    | calcDirection bits (getByte k byte) == 0 = left
-    | otherwise                                = right
+    | calcDirection (0, bits, (getByte k byte)) == 0 = left
+    | otherwise                                      = right
 choose _ _ _ _ = error "Data.CritBit.Core.choose: unpossible!"
 {-# INLINE choose #-}
 
--- Given a critical bitmask and a byte, return 0 to move left, 1 to
+-- Given a difference of two keys, return 0 to move left, 1 to
 -- move right.
-calcDirection :: BitMask -> Word16 -> Int
-calcDirection otherBits c = (1 + fromIntegral (otherBits .|. c)) `shiftR` 9
+calcDirection :: Diff -> Int
+calcDirection (_, bits, c) = (1 + fromIntegral (bits .|. c)) `shiftR` 9
 {-# INLINE calcDirection #-}
 
 -- | Figure out the byte offset at which the key we are interested in
@@ -175,7 +180,7 @@ calcDirection otherBits c = (1 + fromIntegral (otherBits .|. c)) `shiftR` 9
 followPrefixes :: (CritBitKey k) =>
                   k             -- ^ The key from "outside" the tree.
                -> k             -- ^ Key from the leaf we reached.
-               -> (Int, BitMask, Word16)
+               -> Diff
 followPrefixes = followPrefixesFrom 0
 {-# INLINE followPrefixes #-}
 
@@ -188,7 +193,7 @@ followPrefixesFrom :: (CritBitKey k) =>
                       Int           -- ^ Positition to start from
                    -> k             -- ^ First key.
                    -> k             -- ^ Second key.
-                   -> (Int, BitMask, Word16)
+                   -> Diff
 followPrefixesFrom !position !k !l = (n, maskLowerBits (b `xor` c), c)
   where
     n = followPrefixesByteFrom position k l

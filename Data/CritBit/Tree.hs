@@ -361,16 +361,16 @@ lookupOrd accepts k (CritBit root) = findLeaf Nothing found k root
           | accepts (byteCompare lk k) = Just (lk, lv)
           | otherwise                  = Nothing
         finish node
-          | calcDirection nob c == 0 = ifLT node
-          | otherwise                = ifGT node
+          | calcDirection diff == 0 = ifLT node
+          | otherwise               = ifGT node
 
         rewalk i@(Internal left right _ _) =
-          select n nob i (finish i)
-                         (choose k i (rewalk left  <|> ifGT right)
-                                     (rewalk right <|> ifLT left))
+          select diff i (finish i)
+                        (choose k i (rewalk left  <|> ifGT right)
+                                    (rewalk right <|> ifLT left))
         rewalk i = finish i
 
-        (n, nob, c) = followPrefixes k lk
+        diff = followPrefixes k lk
         pair a b = Just (a, b)
         ifGT = test GT  leftmost
         ifLT = test LT rightmost
@@ -623,8 +623,7 @@ unionWithKey f (CritBit lt) (CritBit rt) = CritBit (top lt rt)
         EQ -> sel a $ link a (go al ak bl bk)
                              (go ar (minKey ar) br (minKey br))
       where
-        sel node = select dbyte dbits node (fork a ak b bk)
-        (dbyte, dbits, _) = followPrefixes ak bk
+        sel node = select (followPrefixes ak bk) node (fork a ak b bk)
     -- Assumes that empty nodes exist only on the top level
     go _ _ _ _ = error "Data.CritBit.Tree.unionWithKey.go: Empty"
 
@@ -641,10 +640,10 @@ unionWithKey f (CritBit lt) (CritBit rt) = CritBit (top lt rt)
     {-# INLINE splitB #-}
 
     fork a ak b bk
-      | calcDirection nob c == 0 = Internal b a n nob
-      | otherwise                = Internal a b n nob
+      | calcDirection diff == 0 = Internal b a n nob
+      | otherwise               = Internal a b n nob
       where
-        (n, nob, c) = followPrefixes ak bk
+        diff@(n, nob, _) = followPrefixes ak bk
     {-# INLINE fork #-}
 {-# INLINEABLE unionWithKey #-}
 
@@ -783,8 +782,7 @@ binarySetOpWithKey left both (CritBit lt) (CritBit rt) = CritBit $ top lt rt
 -- 'after' branch initiated by 'Leaf'.
 leafBranch :: CritBitKey k => Node k v -> Node k w -> k -> t -> t -> t
 leafBranch (Leaf lk _) i@(Internal{}) sk before after =
-  select dbyte dbits i after before
-  where (dbyte, dbits, _) = followPrefixes lk sk
+  select (followPrefixes lk sk) i after before
 leafBranch _ _ _ _ _ = error "Data.CritBit.Tree.leafBranch: unpossible"
 {-# INLINE leafBranch #-}
 
@@ -1120,9 +1118,7 @@ submapTypeBy f (CritBit root1) (CritBit root2) = top root1 root2
         | ak == bk  = if f av bv then Equal else No
         | otherwise = No
     go a@(Leaf _ _) ak b@(Internal{}) bk =
-        select dbyte dbits b No $ splitB a ak b bk
-      where
-        (dbyte, dbits, _) = followPrefixes ak bk
+        select (followPrefixes ak bk) b No $ splitB a ak b bk
     go (Internal{}) _ (Leaf _ _) _ = No
     go a@(Internal al ar _ _) ak b@(Internal bl br _ _) bk =
       case compareSplits a b of
@@ -1414,13 +1410,13 @@ alter f !k (CritBit root) = CritBit $ findLeaf
   where
     found lk _ = rewalk root
       where
-        (n,nob,c)  = followPrefixes k lk
-        dir        = calcDirection nob c
+        diff@(n, nob, _) = followPrefixes k lk
+        dir              = calcDirection diff
 
         rewalk i@(Internal left right _ _) =
-          select n nob i (finish i)
-                         (choose k i (setLeft  i $ rewalk left)
-                                     (setRight i $ rewalk right))
+          select diff i (finish i)
+                        (choose k i (setLeft  i $ rewalk left)
+                                    (setRight i $ rewalk right))
         rewalk i = finish i
 
         finish (Leaf _ v)
