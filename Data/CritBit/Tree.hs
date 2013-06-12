@@ -616,14 +616,14 @@ unionWithKey f (CritBit lt) (CritBit rt) = CritBit (top lt rt)
       leafBranch a b bk (splitB a ak b bk) (fork a ak b bk)
     go a@(Internal _ _ _ _) ak b@(Leaf _ _) bk =
       leafBranch b a ak (splitA a ak b bk) (fork a ak b bk)
-    go a@(Internal al ar abyte abits) ak b@(Internal bl br bbyte bbits) bk
-      | (dbyte, dbits) < min (abyte, abits) (bbyte, bbits) = fork a ak b bk
-      | otherwise =
-           case compare (abyte, abits) (bbyte, bbits) of
-             LT -> splitA a ak b bk
-             GT -> splitB a ak b bk
-             EQ -> link a (go al ak bl bk) (go ar (minKey ar) br (minKey br))
+    go a@(Internal al ar _ _) ak b@(Internal bl br _ _) bk =
+      case compareSplits a b of
+        LT -> sel a $ splitA a ak b bk
+        GT -> sel b $ splitB a ak b bk
+        EQ -> sel a $ link a (go al ak bl bk)
+                             (go ar (minKey ar) br (minKey br))
       where
+        sel node = select dbyte dbits node (fork a ak b bk)
         (dbyte, dbits, _) = followPrefixes ak bk
     -- Assumes that empty nodes exist only on the top level
     go _ _ _ _ = error "Data.CritBit.Tree.unionWithKey.go: Empty"
@@ -647,6 +647,15 @@ unionWithKey f (CritBit lt) (CritBit rt) = CritBit (top lt rt)
         (n, nob, c) = followPrefixes ak bk
     {-# INLINE fork #-}
 {-# INLINEABLE unionWithKey #-}
+
+compareSplits :: Node k1 v1 -> Node k2 v2 -> Ordering
+compareSplits (Internal _ _ abyte abits) (Internal _ _ bbyte bbits) =
+  case compare abyte bbyte of
+    LT -> LT
+    EQ -> compare abits bbits
+    GT -> GT
+compareSplits _ _ = error "Data.CritBit.Tree.compareSplits: unpossible"
+{-# INLINE compareSplits #-}
 
 unions :: (CritBitKey k) => [CritBit k v] -> CritBit k v
 unions cs = List.foldl' union empty cs
@@ -749,8 +758,8 @@ binarySetOpWithKey left both (CritBit lt) (CritBit rt) = CritBit $ top lt rt
       leafBranch a b bk (splitB a ak b bk) (left a)
     go a@(Internal _ _ _ _) ak b@(Leaf _ _) bk =
       leafBranch b a ak (splitA a ak b bk) (left a)
-    go a@(Internal al ar abyte abits) ak b@(Internal bl br bbyte bbits) bk =
-      case compare (abyte, abits) (bbyte, bbits) of
+    go a@(Internal al ar _ _) ak b@(Internal bl br _ _) bk =
+      case compareSplits a b of
         LT -> splitA a ak b bk
         GT -> splitB a ak b bk
         EQ -> link a (go al ak bl bk) (go ar (minKey ar) br (minKey br))
@@ -1114,9 +1123,9 @@ submapTypeBy f (CritBit root1) (CritBit root2) = top root1 root2
         select dbyte dbits b No $ splitB a ak b bk
       where
         (dbyte, dbits, _) = followPrefixes ak bk
-    go (Internal _ _ _ _) _ (Leaf _ _) _ = No
-    go a@(Internal al ar abyte abits) ak b@(Internal bl br bbyte bbits) bk =
-      case compare (abyte, abits) (bbyte, bbits) of
+    go (Internal{}) _ (Leaf _ _) _ = No
+    go a@(Internal al ar _ _) ak b@(Internal bl br _ _) bk =
+      case compareSplits a b of
         LT -> No
         GT -> splitB a ak b bk
         EQ -> min (go al ak bl bk) (go ar (minKey ar) br (minKey br))
