@@ -639,11 +639,7 @@ unionWithKey f (CritBit lt) (CritBit rt) = CritBit (top lt rt)
       error "Data.CritBit.Tree.unionWithKey.splitB: unpossible"
     {-# INLINE splitB #-}
 
-    fork a ak b bk
-      | calcDirection diff == 0 = Internal b a n nob
-      | otherwise               = Internal a b n nob
-      where
-        diff@(n, nob, _) = followPrefixes ak bk
+    fork a ak b bk = internal (followPrefixes ak bk) b a
     {-# INLINE fork #-}
 {-# INLINEABLE unionWithKey #-}
 
@@ -1410,9 +1406,6 @@ alter f !k (CritBit root) = CritBit $ findLeaf
   where
     found lk _ = rewalk root
       where
-        diff@(n, nob, _) = followPrefixes k lk
-        dir              = calcDirection diff
-
         rewalk i@(Internal left right _ _) =
           select diff i (finish i)
                         (choose k i (setLeft  i $ rewalk left)
@@ -1422,9 +1415,9 @@ alter f !k (CritBit root) = CritBit $ findLeaf
         finish (Leaf _ v)
           | k == lk   = maybe Empty (Leaf k) . f $ Just v
         finish i      = maybe i (ins . Leaf k) . f $ Nothing
-            where ins leaf
-                    | dir == 0  = Internal i leaf n nob
-                    | otherwise = Internal leaf i n nob
+            where ins leaf = internal diff i leaf
+
+        diff = followPrefixes k lk
 
 -- | /O(n)/. Partition the map according to a predicate. The first
 -- map contains all elements that satisfy the predicate, the second all

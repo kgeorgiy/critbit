@@ -24,6 +24,7 @@ module Data.CritBit.Core
     , leftmost
     , rightmost
     -- * Internal functions
+    , internal
     , calcDirection
     , choose
     , select
@@ -67,15 +68,17 @@ insertWithKey f k v (CritBit root) = CritBit $ findLeaf (Leaf k v) found k root
         rewalk i = finish i
 
         finish (Leaf _ v') | k == lk = Leaf k (f k v v')
-        finish node
-          | nd == 0   = Internal { ileft = node, iright = Leaf k v,
-                                   ibyte = n, iotherBits = nob }
-          | otherwise = Internal { ileft = Leaf k v, iright = node,
-                                   ibyte = n, iotherBits = nob }
+        finish node = internal diff node (Leaf k v)
 
-        diff@(n, nob, _) = followPrefixes k lk
-        nd               = calcDirection diff
+        diff = followPrefixes k lk
 {-# INLINABLE insertWithKey #-}
+
+-- | Creates internal node based on key difference
+internal :: Diff -> Node k v -> Node k v -> Node k v
+internal diff@(!byte, !bits, _) n1 n2
+  | calcDirection diff == 0 = Internal n1 n2 byte bits
+  | otherwise               = Internal n2 n1 byte bits
+{-# INLINE internal #-}
 
 findLeaf :: CritBitKey k => a -> (k -> v -> a) -> k -> Node k v -> a
 findLeaf notFound found k node = go node
