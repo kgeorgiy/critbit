@@ -360,9 +360,7 @@ lookupOrd accepts k (CritBit root) = findLeaf Nothing found k root
         finish (Leaf _ _)
           | accepts (byteCompare lk k) = Just (lk, lv)
           | otherwise                  = Nothing
-        finish node
-          | calcDirection diff == 0 = ifLT node
-          | otherwise               = ifGT node
+        finish node = chooseByDiff diff (ifLT node) (ifGT node)
 
         rewalk i@(Internal left right _ _) =
           select diff i (finish i)

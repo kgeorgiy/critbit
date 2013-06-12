@@ -25,7 +25,7 @@ module Data.CritBit.Core
     , rightmost
     -- * Internal functions
     , internal
-    , calcDirection
+    , chooseByDiff
     , choose
     , select
     , findLeaf
@@ -75,9 +75,9 @@ insertWithKey f k v (CritBit root) = CritBit $ findLeaf (Leaf k v) found k root
 
 -- | Creates internal node based on key difference
 internal :: Diff -> Node k v -> Node k v -> Node k v
-internal diff@(!byte, !bits, _) n1 n2
-  | calcDirection diff == 0 = Internal n1 n2 byte bits
-  | otherwise               = Internal n2 n1 byte bits
+internal diff@(!byte, !bits, _) n1 n2 =
+  chooseByDiff diff (Internal n1 n2 byte bits)
+                    (Internal n2 n1 byte bits)
 {-# INLINE internal #-}
 
 findLeaf :: CritBitKey k => a -> (k -> v -> a) -> k -> Node k v -> a
@@ -163,17 +163,16 @@ select _ _ _ _ = error "Data.CritBit.Core.select: unpossible!"
 -- | Chooses one of the values depending on the direction we should
 -- | move down the tree.
 choose :: (CritBitKey k) => k -> Node k v -> a -> a -> a
-choose k (Internal _ _ byte bits) left right
-    | calcDirection (0, bits, (getByte k byte)) == 0 = left
-    | otherwise                                      = right
-choose _ _ _ _ = error "Data.CritBit.Core.choose: unpossible!"
+choose k (Internal _ _ byte bits) = chooseByDiff (0, bits, (getByte k byte))
+choose _ _ = error "Data.CritBit.Core.choose: unpossible!"
 {-# INLINE choose #-}
 
--- Given a difference of two keys, return 0 to move left, 1 to
--- move right.
-calcDirection :: Diff -> Int
-calcDirection (_, bits, c) = (1 + fromIntegral (bits .|. c)) `shiftR` 9
-{-# INLINE calcDirection #-}
+-- Chooses one of the values base on difference of two keys
+chooseByDiff :: Diff -> a -> a -> a
+chooseByDiff (_, bits, c) before after
+  | (1 + (bits .|. c)) `shiftR` 9 == 0 = before
+  | otherwise                          = after
+{-# INLINE chooseByDiff #-}
 
 -- | Figure out the byte offset at which the key we are interested in
 -- differs from the leaf we reached when we initially walked the tree.
