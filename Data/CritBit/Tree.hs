@@ -357,7 +357,7 @@ lookupOrd accepts k (CritBit root) = findLeaf Nothing found k root
   where
     found lk lv = rewalk root
       where
-        finish (Leaf _ _)
+        finish (Leaf{})
           | accepts (byteCompare lk k) = Just (lk, lv)
           | otherwise                  = Nothing
         finish node = chooseByDiff diff (ifLT node) (ifGT node)
@@ -439,8 +439,8 @@ size :: CritBit k v -> Int
 size (CritBit root) = go root
   where
     go (Internal l r _ _) = go l + go r
-    go (Leaf _ _) = 1
-    go Empty      = 0
+    go (Leaf{})           = 1
+    go Empty              = 0
 
 -- | /O(n)/. Fold the values in the map using the given
 -- left-associative function, such that
@@ -610,9 +610,9 @@ unionWithKey f (CritBit lt) (CritBit rt) = CritBit (top lt rt)
     go a@(Leaf ak av) _ b@(Leaf bk bv) _
         | ak == bk = Leaf ak (f ak av bv)
         | otherwise = fork a ak b bk
-    go a@(Leaf _ _) ak b@(Internal _ _ _ _) bk =
+    go a@(Leaf{}) ak b@(Internal{}) bk =
       leafBranch a b bk (splitB a ak b bk) (fork a ak b bk)
-    go a@(Internal _ _ _ _) ak b@(Leaf _ _) bk =
+    go a@(Internal{}) ak b@(Leaf{}) bk =
       leafBranch b a ak (splitA a ak b bk) (fork a ak b bk)
     go a@(Internal al ar _ _) ak b@(Internal bl br _ _) bk =
       case compareSplits a b of
@@ -747,9 +747,9 @@ binarySetOpWithKey left both (CritBit lt) (CritBit rt) = CritBit $ top lt rt
     go a@(Leaf ak av) _ (Leaf bk bv) _
         | ak == bk  = maybe Empty (Leaf ak) $ both ak av bv
         | otherwise = left a
-    go a@(Leaf _ _) ak b@(Internal _ _ _ _) bk =
+    go a@(Leaf{}) ak b@(Internal{}) bk =
       leafBranch a b bk (splitB a ak b bk) (left a)
-    go a@(Internal _ _ _ _) ak b@(Leaf _ _) bk =
+    go a@(Internal{}) ak b@(Leaf{}) bk =
       leafBranch b a ak (splitA a ak b bk) (left a)
     go a@(Internal al ar _ _) ak b@(Internal bl br _ _) bk =
       case compareSplits a b of
@@ -1111,9 +1111,9 @@ submapTypeBy f (CritBit root1) (CritBit root2) = top root1 root2
     go (Leaf ak av) _ (Leaf bk bv) _
         | ak == bk  = if f av bv then Equal else No
         | otherwise = No
-    go a@(Leaf _ _) ak b@(Internal{}) bk =
+    go a@(Leaf{}) ak b@(Internal{}) bk =
         select (followPrefixes ak bk) b No $ splitB a ak b bk
-    go (Internal{}) _ (Leaf _ _) _ = No
+    go (Internal{}) _ (Leaf{}) _ = No
     go a@(Internal al ar _ _) ak b@(Internal bl br _ _) bk =
       case compareSplits a b of
         LT -> No
