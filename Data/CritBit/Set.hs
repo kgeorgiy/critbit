@@ -102,12 +102,12 @@ instance (Show a) => Show (Set a) where
     show s = "fromList " ++ show (toList s)
 
 instance Foldable Set where
+    foldMap _ (Set  CritBitE  ) = mempty
     foldMap f (Set (CritBit n)) = foldSet f n
 
 foldSet :: (Monoid m) => (a -> m) -> Node a () -> m
 foldSet f (Internal l r _ _) = mappend (foldSet f l) (foldSet f r)
 foldSet f (Leaf k _)         = f k
-foldSet _ Empty              = mempty
 {-# INLINABLE foldSet #-}
 
 -- | /O(1)/. Is the set empty?

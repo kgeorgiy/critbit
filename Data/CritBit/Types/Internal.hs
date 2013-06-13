@@ -42,34 +42,34 @@ data Node k v =
     -- bytes).
     }
     | Leaf k v
-    | Empty
-    -- ^ Logically, the 'Empty' constructor is a property of the tree,
-    -- rather than a node (a non-empty tree will never contain any
-    -- 'Empty' constructors). In practice, turning 'CritBit' from a
-    -- newtype into an ADT with an 'Empty' constructor adds a
-    -- pattern-match and a memory indirection to every function, which
-    -- slows them all down.
       deriving (Eq, Show)
 
 instance (NFData k, NFData v) => NFData (Node k v) where
     rnf (Internal l r _ _) = rnf l `seq` rnf r
     rnf (Leaf k v)         = rnf k `seq` rnf v
-    rnf Empty              = ()
 
 instance Functor (Node k) where
     fmap f i@(Internal l r _ _) = i { ileft = fmap f l, iright = fmap f r }
     fmap f (Leaf k v)           = Leaf k (f v)
-    fmap _ Empty                = Empty
 
 instance Foldable (Node k) where
     foldMap f (Internal l r _ _) = mappend (foldMap f l) (foldMap f r)
     foldMap f (Leaf _ v)         = f v
-    foldMap _ Empty              = mempty
 
 -- | A crit-bit tree.
-newtype CritBit k v = CritBit {
-      cbRoot :: Node k v
-    } deriving (Eq, NFData, Functor, Foldable)
+data CritBit k v = CritBit !(Node k v) | CritBitE deriving (Eq)
+
+instance Functor (CritBit k) where
+    fmap _ CritBitE = CritBitE
+    fmap f (CritBit root) = CritBit $ fmap f root
+
+instance (NFData k, NFData v) => NFData (CritBit k v) where
+    rnf (CritBit root) = rnf root
+    rnf CritBitE       = ()
+
+instance Foldable (CritBit k) where
+    foldMap f (CritBit root) = foldMap f root
+    foldMap _ CritBitE       = mempty
 
 instance (Show k, Show v) => Show (CritBit k v) where
     show t = "fromList " ++ show (toList t)
@@ -126,8 +126,8 @@ instance CritBitKey Text where
 -- > toList (fromList [("b",3), ("a",5)]) == [("a",5),("b",3)]
 -- > toList empty == []
 toList :: CritBit k v -> [(k, v)]
+toList CritBitE = []
 toList (CritBit root) = go root []
   where
     go (Internal l r _ _) next = go l (go r next)
     go (Leaf k v) next         = (k,v) : next
-    go Empty next              = next

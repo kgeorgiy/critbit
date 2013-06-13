@@ -48,6 +48,7 @@ import Data.Word (Word16)
 -- > insertWithKey f "a" 1 empty                         == singleton "a" 1
 insertWithKey :: CritBitKey k => (k -> v -> v -> v) -> k -> v -> CritBit k v
               -> CritBit k v
+insertWithKey _ k v CritBitE = CritBit (Leaf k v)
 insertWithKey f k v (CritBit root) = CritBit . go $ root
   where
     go i@(Internal left right _ _)
@@ -71,7 +72,6 @@ insertWithKey f k v (CritBit root) = CritBit . go $ root
 
         (n, nob, c) = followPrefixes k lk
         nd          = calcDirection nob c
-    go Empty = Leaf k v
 {-# INLINABLE insertWithKey #-}
 
 lookupWith :: (CritBitKey k) =>
@@ -81,13 +81,15 @@ lookupWith :: (CritBitKey k) =>
            -> CritBit k v -> a
 -- We use continuations here to avoid reimplementing the lookup
 -- algorithm with trivial variations.
+lookupWith notFound _     _  CritBitE      = notFound
 lookupWith notFound found k (CritBit root) = go root
   where
     go i@(Internal left right _ _)
        | direction k i == 0  = go left
        | otherwise           = go right
-    go (Leaf lk v) | k == lk = found v
-    go _                     = notFound
+    go (Leaf lk v)
+       | k == lk   = found v
+       | otherwise = notFound
 {-# INLINE lookupWith #-}
 
 -- | /O(log n)/. Lookup and update; see also 'updateWithKey'.
@@ -106,13 +108,13 @@ updateLookupWithKey :: (CritBitKey k) => (k -> v -> Maybe v) -> k
 --
 -- (If you want a good little exercise, rewrite this function without
 -- using continuations, and benchmark the two versions.)
+updateLookupWithKey _ _    CritBitE      = (Nothing, CritBitE)
 updateLookupWithKey f k t@(CritBit root) = top root
   where
     top i@(Internal left right _ _) = go i left right CritBit
     top (Leaf lk lv) | k == lk =
-      maybeUpdate lk lv (\v -> CritBit $ Leaf lk v) (CritBit Empty)
+      maybeUpdate lk lv (\v -> CritBit $ Leaf lk v) CritBitE
     top _ = (Nothing, t)
-
     go i left right cont
       | direction k i == 0 =
         case left of
@@ -121,7 +123,6 @@ updateLookupWithKey f k t@(CritBit root) = top root
           Leaf lk lv -> maybeUpdate lk lv
                         (\v -> cont $! i { ileft = (Leaf lk v) })
                         (cont right)
-          _ -> error "Data.CritBit.Core.updateLookupWithKey: Empty in tree."
       | otherwise =
         case right of
           i'@(Internal left' right' _ _) ->
@@ -129,8 +130,6 @@ updateLookupWithKey f k t@(CritBit root) = top root
           Leaf lk lv -> maybeUpdate lk lv
                         (\v -> cont $! i { iright = (Leaf lk v) })
                         (cont left)
-          _ -> error "Data.CritBit.Core.updateLookupWithKey: Empty in tree."
-
     maybeUpdate lk lv c1 c2
       | k == lk = case f lk lv of
                     Just lv' -> (Just lv', c1 lv')
@@ -207,7 +206,7 @@ followPrefixesByteFrom !position !k !l = go position
             c = getByte l n
 {-# INLINE followPrefixesByteFrom #-}
 
-leftmost, rightmost :: a -> (k -> v -> a) -> Node k v -> a
+leftmost, rightmost :: (k -> v -> a) -> Node k v -> a
 leftmost  = extremity ileft
 {-# INLINE leftmost #-}
 rightmost = extremity iright
@@ -215,14 +214,12 @@ rightmost = extremity iright
 
 -- | Generic function so we can easily implement 'leftmost' and 'rightmost'.
 extremity :: (Node k v -> Node k v) -- ^ Either 'ileft' or 'iright'.
-          -> a                      -- ^ 'Empty' continuation.
           -> (k -> v -> a)          -- ^ 'Leaf' continuation.
           -> Node k v
           -> a
-extremity direct onEmpty onLeaf node = go node
+extremity direct onLeaf node = go node
   where
     go i@(Internal{}) = go $ direct i
     go (Leaf k v)     = onLeaf k v
-    go _              = onEmpty
     {-# INLINE go #-}
 {-# INLINE extremity #-}
